@@ -30,7 +30,7 @@ bindings <- bindings[bindings != ""]
 bindings <- c("All formats" = "all", bindings)
 
 # ---- UI ----
-ui <- page_fluid(
+ui <- fluidPage(
   theme = bs_theme(
     version = 5,
     bootswatch = "flatly"
@@ -77,97 +77,98 @@ ui <- page_fluid(
     p("Browse through my library and pick something to read.")
   ),
 
-  layout_sidebar(
-    sidebar = div(
-      class = "sidebar-card",
-      h4("Filters"),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      div(
+        class = "sidebar-card",
+        h4("Filters"),
 
-      selectInput(
-        "shelf_filter",
-        "Shelf",
-        choices = c(
-          "Books I've read"   = "read",
-          "My 'to-read' list" = "to-read",
-          "All shelves"       = "all"
+        selectInput(
+          "shelf_filter",
+          "Shelf",
+          choices = c(
+            "Books I've read"   = "read",
+            "My 'to-read' list" = "to-read",
+            "All shelves"       = "all"
+          ),
+          selected = "read"   # default to  READ shelf
         ),
-        selected = "read"   # default to your READ shelf
-      ),
 
-      sliderInput(
-        "my_rating_filter",
-        "My rating (stars)",
-        min = 0, max = 5,
-        value = c(0, 5),
-        step = 1
-      ),
-
-      sliderInput(
-        "avg_rating_filter",
-        "Average Goodreads rating",
-        min = 0, max = 5,
-        value = c(3, 5),
-        step = 0.1
-      ),
-
-      if (is.finite(min_year) && is.finite(max_year)) {
         sliderInput(
-          "year_filter",
-          "Year published",
-          min = min_year,
-          max = max_year,
-          value = c(min_year, max_year),
-          step = 1,
-          sep = ""
-        )
-      } else {
+          "my_rating_filter",
+          "My rating (stars)",
+          min = 0, max = 5,
+          value = c(0, 5),
+          step = 1
+        ),
+
         sliderInput(
-          "year_filter",
-          "Year published",
-          min = 1950,
-          max = as.integer(format(Sys.Date(), "%Y")),
-          value = c(1950, as.integer(format(Sys.Date(), "%Y"))),
-          step = 1,
-          sep = ""
-        )
-      },
+          "avg_rating_filter",
+          "Average Goodreads rating",
+          min = 0, max = 5,
+          value = c(0, 5),     # wide open so nothing disappears by accident
+          step = 0.1
+        ),
 
-      selectInput(
-        "binding_filter",
-        "Format",
-        choices = bindings,
-        selected = "all"
-      ),
+        if (is.finite(min_year) && is.finite(max_year)) {
+          sliderInput(
+            "year_filter",
+            "Year published",
+            min = min_year,
+            max = max_year,
+            value = c(min_year, max_year),
+            step = 1,
+            sep = ""
+          )
+        } else {
+          sliderInput(
+            "year_filter",
+            "Year published",
+            min = 1950,
+            max = as.integer(format(Sys.Date(), "%Y")),
+            value = c(1950, as.integer(format(Sys.Date(), "%Y"))),
+            step = 1,
+            sep = ""
+          )
+        },
 
-      textInput(
-        "search_text",
-        "Search title or author",
-        placeholder = "e.g., 'Armstrong' or 'fantasy'"
-      ),
+        selectInput(
+          "binding_filter",
+          "Format",
+          choices = bindings,
+          selected = "all"
+        ),
 
-      helpText("Tip: click a row in the table to see full details.")
+        textInput(
+          "search_text",
+          "Search title or author",
+          placeholder = "e.g., 'Armstrong' or 'fantasy'"
+        ),
+
+        helpText("Tip: click a row in the table to see full details.")
+      )
     ),
 
-    main = div(
-      class = "main-card",
-      h4("Books matching your filters"),
-
-      # surprise buttons row
+    mainPanel(
+      width = 9,
       div(
-        class = "d-flex justify-content-end mb-2",
-        actionButton("surprise_read", "Surprise me (read shelf)"),
-        actionButton("surprise_toread", "Surprise me (to-read)", class = "ms-2")
-      ),
+        class = "main-card",
+        h4("Books matching your filters"),
 
-      DTOutput("book_table"),
+        # surprise buttons row
+        div(
+          class = "d-flex justify-content-end mb-2",
+          actionButton("surprise_read", "Surprise me (read shelf)"),
+          actionButton("surprise_toread", "Surprise me (to-read)", class = "ms-2")
+        ),
 
-      div(
-        class = "book-details",
+        DTOutput("book_table"),
+
         hr(),
-        uiOutput("book_details")
-      ),
+        h4("Selected book"),
+        uiOutput("book_details"),
 
-      div(
-        class = "surprise-details",
         hr(),
         h4("Random recommendation"),
         uiOutput("surprise_details")
@@ -179,13 +180,13 @@ ui <- page_fluid(
 # ---- Server ----
 server <- function(input, output, session) {
 
-  # reactive for filters
+  # main filtered dataset
   filtered_books <- reactive({
-    req(input$year_filter)  # make sure slider exists
+    req(input$my_rating_filter, input$avg_rating_filter, input$year_filter)
 
     df <- goodreads
 
-    # Shelf filter
+    # Shelf
     if (input$shelf_filter != "all") {
       df <- df %>%
         filter(Exclusive.Shelf == input$shelf_filter)
@@ -205,7 +206,7 @@ server <- function(input, output, session) {
         Average.Rating <= input$avg_rating_filter[2]
       )
 
-    # Year filter
+    # Year
     df <- df %>%
       filter(
         is.na(Year.Published) |
@@ -232,13 +233,19 @@ server <- function(input, output, session) {
     df
   })
 
-  # ---- main table ----
+  # ---- table ----
   output$book_table <- renderDT({
     df <- filtered_books()
 
-    validate(
-      need(nrow(df) > 0, "No books match your filters. Try widening them!")
-    )
+    if (nrow(df) == 0) {
+      return(datatable(
+        data.frame(
+          Message = "No books match your filters. Try widening them!"
+        ),
+        options = list(dom = "t"),
+        rownames = FALSE
+      ))
+    }
 
     df_table <- df %>%
       transmute(
@@ -287,9 +294,9 @@ server <- function(input, output, session) {
 
     book <- df[sel, ]
 
-    year_str   <- ifelse(is.na(book$Year.Published), "Unknown", book$Year.Published)
-    binding_str <- ifelse(book$Binding == "" | is.na(book$Binding), "Unknown", book$Binding)
-    pages_str  <- ifelse(is.na(book$Number.of.Pages), "Unknown", book$Number.of.Pages)
+    year_str      <- ifelse(is.na(book$Year.Published), "Unknown", book$Year.Published)
+    binding_str   <- ifelse(book$Binding == "" | is.na(book$Binding), "Unknown", book$Binding)
+    pages_str     <- ifelse(is.na(book$Number.of.Pages), "Unknown", book$Number.of.Pages)
     date_read_str <- ifelse(book$Date.Read == "" | is.na(book$Date.Read),
                             "Not recorded",
                             book$Date.Read)
@@ -352,9 +359,9 @@ server <- function(input, output, session) {
       )
     }
 
-    year_str   <- ifelse(is.na(book$Year.Published), "Unknown", book$Year.Published)
+    year_str    <- ifelse(is.na(book$Year.Published), "Unknown", book$Year.Published)
     binding_str <- ifelse(book$Binding == "" | is.na(book$Binding), "Unknown", book$Binding)
-    pages_str  <- ifelse(is.na(book$Number.of.Pages), "Unknown", book$Number.of.Pages)
+    pages_str   <- ifelse(is.na(book$Number.of.Pages), "Unknown", book$Number.of.Pages)
 
     tagList(
       h3(book$Title),
@@ -383,5 +390,5 @@ server <- function(input, output, session) {
     )
   })
 }
-# ---- Run app ----
+
 shinyApp(ui, server)
