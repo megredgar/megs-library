@@ -1,4 +1,4 @@
-# app.R
+# my library exploring app using shiny
 
 library(shiny)
 library(dplyr)
